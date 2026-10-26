@@ -1,121 +1,161 @@
-# CareMate
+# CareMate: doctor, lab test and medicine booking with a live availability board
 
-A healthcare booking web app: see every speciality's next free slot live, book a video or clinic consultation, schedule a home lab-test pickup, order medicines, and manage it all from one page.
+![CI](https://github.com/Mahendr99ar/caremate-web/actions/workflows/ci.yml/badge.svg)
+![Node](https://img.shields.io/badge/node-20%2B-339933)
+![React](https://img.shields.io/badge/react-19-61dafb)
 
-Frontend: **React 19, Redux Toolkit (RTK Query), React Router, react-window**
-Backend: **Node.js, Express 5, cookie-based sessions (express-session), bcrypt**
+**Live demo:** [caremate-9nkr.onrender.com](https://caremate-9nkr.onrender.com) · **Author:** [Mahendra Meena](https://github.com/Mahendr99ar)
 
-![Home page with the live availability board](docs/screenshots/home.png)
+CareMate is a healthcare booking web app built with **React, Redux Toolkit and Express**. The home
+page shows every speciality's **next free slot**, styled like the LED token board in a hospital
+waiting room, and updates as people book. Patients can book a video or clinic consultation, schedule
+a home sample pickup and order medicines, and the server makes sure **two people can never book the
+same slot**, even when they press the button at the same moment.
+
+![CareMate home page: next free slot for each speciality, with the doctor who has it](docs/screenshots/home.png)
+
+```mermaid
+flowchart LR
+    B[Browser<br/>React 19 + Redux Toolkit] -->|"/api, JSON + session cookie"| E
+    B -->|"/, /assets"| E
+    subgraph E[Express server · one process]
+        S[Static files<br/>built React app, gzip]
+        A[Auth<br/>sessions, CSRF guard,<br/>login limiter]
+        R[Routes<br/>doctors, consultations,<br/>labs, pharmacy]
+        SV[Services<br/>slots, pricing]
+        A --> R --> SV
+    end
+    SV --> D[(store.js<br/>users, bookings, orders)]
+```
 
 ## Features
 
-| Area | What it does |
+| Area | What is implemented |
 |---|---|
-| Availability board | The home page shows each speciality's earliest free slot, the doctor who has it and the lowest fee, styled like a hospital OPD token display. It polls every minute and refreshes immediately after you book. |
-| Quick search | Press Ctrl+K (⌘K on Mac) or `/` anywhere to search doctors and pages from the keyboard. Arrow keys move, Enter opens. |
-| Auth | Register, log in, log out. The session lives in an `httpOnly`, `SameSite=Lax` cookie, marked `Secure` over HTTPS. The session id is regenerated on login, and five wrong passwords lock the email for 15 minutes. If the session ends (expired, logged out in another tab, server restart), the next request sends you to the login page. |
-| Doctors | 500 doctors, filters by speciality and city, debounced search, four sort orders. Filters live in the URL, so a search can be shared or restored with Back. The list is virtualized. |
-| Consultations | Pick a date in the next 7 days and a free slot. Slots skip the lunch hour and times already past (IST). The server rechecks the slot when you book, so two people can't take the same one. |
-| Lab tests | Choose several tests, a collection window (at most 3 homes per window) and an address. Tests that need fasting show a warning. |
-| Pharmacy | Cart in Redux, saved to `localStorage`. Free delivery above ₹499. The server recalculates every price. Prescription medicines are flagged. |
-| My bookings | Tabs for consultations, lab tests and orders, with cancel and a confirmation dialog. Arrow keys switch tabs. |
+| Availability board | Earliest free slot per speciality, the doctor who has it and the lowest fee; polls every minute and refreshes right after a booking |
+| Booking | 7-day slot picker that skips the lunch hour and times already past in IST; the server rechecks the slot at booking time and answers `409` if someone got there first |
+| Doctors | 500 doctors, filters by speciality and city, debounced search, four sort orders; filters live in the URL so Back and shared links work; virtualized list |
+| Quick search | Ctrl+K / ⌘K or `/` from any page opens a keyboard-driven search over doctors and pages (ARIA combobox) |
+| Auth | Cookie sessions (`httpOnly`, `SameSite=Lax`, `Secure` over HTTPS), session id regenerated on login, 5 wrong passwords lock an email for 15 minutes, any `401` sends the user back to login |
+| Lab tests | Several tests in one booking, home collection windows capped at 3 homes each, fasting warnings |
+| Pharmacy | Redux cart saved to `localStorage`, server-side pricing that ignores prices sent by the browser, prescription medicines flagged |
+| My bookings | Consultations, lab tests and orders in keyboard-operable tabs, with cancel and a confirmation dialog |
+| Testing | 22 API tests (node:test + supertest), 23 UI tests (Vitest + Testing Library), a Playwright run through the whole app, and a booking race test |
 
-## Running locally
+## Results
 
-Needs Node 20 or newer.
+Measured on a 2-vCPU Linux VM running the production build, with the load generator
+([autocannon](https://github.com/mcollina/autocannon), 20 connections for 10 s) on the same machine.
+
+| Test | Result |
+|---|---|
+| 50 accounts book the same slot at the same moment | **1 booked, 49 refused** with `409`, 0 errors |
+| Doctor list API (filter by speciality, sort by rating) | **~1,750 req/s**, p50 9 ms, p99 24 ms, 0 errors |
+| Availability board API | **~480 req/s**, p50 37 ms, p99 89 ms, 0 errors |
+| Board profiling fix (see below) | **~11×** throughput (44 → ~480 req/s), p50 431 → 37 ms |
+| gzip on the Express server | Home page **514 → 255 KB** transferred, JavaScript 353 → 115 KB |
+| Virtualized doctor list | **11 of 500** rows in the DOM at a time |
+| Lighthouse, mobile emulation (local production build) | Performance 80 to 86, Accessibility **100**, Best practices **100**, SEO **100** |
+
+**The board fix.** A CPU profile showed most of each board request going into converting the
+clock to IST, which ran once per doctor (1,000 times per request), and into rebuilding every
+doctor's slot list from strings. Now the time is converted once per request, each doctor's working
+day is built once and cached, and bookings are grouped by doctor before the scan. One board now
+takes 3.4 ms to build, and 6.6 ms with 10,000 bookings in the system.
+
+## Quick start
+
+Requires Node 20+.
 
 ```bash
-npm run setup      # installs server and client packages
+npm run setup                 # install server and client packages
+npm test                      # 22 API tests + 23 UI tests
 
-npm run server     # terminal 1: API on http://localhost:4000
-npm run client     # terminal 2: app on http://localhost:5173
+npm run server                # terminal 1: API on http://localhost:4000
+npm run client                # terminal 2: open http://localhost:5173
 ```
 
-The Vite dev server proxies `/api` to port 4000, so the browser sees one origin and the session cookie works without CORS.
+Run it exactly as Render does, one process serving the API and the built app:
 
 ```bash
-npm test           # 22 API tests + 23 frontend tests
-npm run lint
+npm run build
+NODE_ENV=production SESSION_SECRET=local-test npm start     # open http://localhost:4000
+node server/scripts/race-test.js http://localhost:4000 50     # 50 simultaneous bookings, expects 1 to win
 ```
 
-## Deploying to Render
+Deploying: push to GitHub, then **New > Blueprint** on Render. `render.yaml` sets the build and
+start commands, `NODE_ENV`, a generated `SESSION_SECRET` and the `/api/health` check.
 
-In production one Express server serves both the API and the built React app.
+## API
 
-1. Push this folder to a GitHub repository.
-2. On Render, choose **New > Blueprint** and pick the repository. `render.yaml` sets everything up: the build and start commands, `NODE_ENV=production`, a generated `SESSION_SECRET`, and a health check on `/api/health`.
-3. Open the URL Render gives you.
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/auth/register` · `/login` · `/logout` | body `{name?, email, password}`; sets or clears the session cookie |
+| `GET` | `/api/auth/me` | the signed-in user, or `{"user": null}` |
+| `GET` | `/api/doctors` | `?search=&speciality=&city=&sort=rating\|fee_asc\|fee_desc\|experience&page=&limit=` |
+| `GET` | `/api/doctors/board` | next free slot, doctor count and lowest fee per speciality |
+| `GET` | `/api/doctors/{id}/slots` | `?date=YYYY-MM-DD`; every slot that day with `available` true or false |
+| `GET` `POST` | `/api/consultations` | your bookings; book with `{doctorId, date, time, mode}`, `409` if the slot is gone |
+| `PATCH` | `/api/consultations/{id}/cancel` | cancel one of your own bookings |
+| `GET` | `/api/lab-tests` · `/api/lab-tests/collection-slots` | test catalogue; `?date=` gives windows with spots left |
+| `GET` `POST` | `/api/lab-bookings` | your lab bookings; book with `{testIds, date, time, address}` |
+| `GET` | `/api/medicines` | `?search=` |
+| `GET` `POST` | `/api/orders` | your orders; order with `{items: [{medicineId, quantity}], address}`, priced on the server |
+| `GET` | `/api/health` | `{"ok": true}` for Render's health check |
 
-To set it up by hand instead, create a Web Service with build command `npm run build`, start command `npm start`, and the two environment variables above.
-
-On Render's free plan the server goes to sleep when nobody has visited for a while, and the next visit can take up to a minute while it wakes. The disk is also wiped on every restart or deploy, so accounts and bookings reset. That is fine for a portfolio demo; see Known limitations.
+Every write must be `application/json`; anything else gets `415`.
 
 ## Project structure
 
 ```
-server/src
-  app.js               builds the Express app; in production also serves client/dist
-  routes/              one router per resource
-  services/slots.js    turns doctor hours into bookable slots
-  services/pricing.js  order totals, the single source of truth for prices
-  middleware/          CSRF guard, login limiter, auth check, error handler
-  data/store.js        small JSON-backed store; the only file that knows about storage
-
-client/src
-  services/api.js      every API call as RTK Query endpoints, plus the session-expiry check
-  app/store.js         Redux store and cart persistence
-  components/ui/       Button, TextField, Modal, ChoiceChips, QuantityStepper
-  components/layout/   Navbar, command palette, protected route
-  features/<area>/     pages and components grouped by feature
-  styles/global.css    design tokens and all styles
+server/src/
+  app.js            Express app: gzip, sessions, routes, and the built React app in production
+  routes/           auth, doctors (+ board), consultations, labs, pharmacy
+  services/
+    slots.js        working hours to bookable slots, cached per doctor
+    pricing.js      order totals; the only place prices are decided
+  middleware/       CSRF guard, login limiter, auth check, error handler
+  data/store.js     JSON-backed store; the only file that knows about storage
+  utils/clock.js    "today" and "now" in IST
+server/scripts/
+  race-test.js      many accounts book one slot at once; exactly one must win
+server/test/        API and slot tests
+client/src/
+  services/api.js   every endpoint as RTK Query, plus the session-expiry check
+  app/store.js      Redux store and cart persistence
+  features/         home board, doctors, labs, pharmacy, cart, bookings, auth
+  components/       UI kit (Button, Modal, ChoiceChips...) and layout (Navbar, command palette)
+  styles/global.css design tokens and all styles
 ```
 
-## Design
+## Design decisions
 
-The home page opens with the thing patients care about most: how soon they can be seen. The board borrows the look of the amber LED token displays in Indian hospital waiting rooms, set in the Doto dot-matrix face. It is the only bold element; the rest of the site stays quiet so the board carries the identity.
+* **Cookie sessions instead of a JWT in localStorage.** JavaScript can't read an `httpOnly`
+  cookie, so an XSS bug can't steal the session. CSRF is handled by `SameSite=Lax` plus a server
+  rule that rejects any write that isn't JSON, which a plain HTML form can't send.
+* **The server decides prices and availability.** The cart shows a total for convenience, but the
+  order endpoint looks every price up itself. Slot checks and inserts run in the same synchronous
+  block on Node's single thread, so no other request can slip in between; the race test above
+  checks this.
+* **RTK Query for server data, a slice only for the cart.** Booking invalidates the `Slots` tag,
+  so the slot list and the home board refetch on their own. Queries for personal data are skipped
+  until a signed-in user is known, so logging out can't trigger a stray `401`.
+* **Clinic time is IST everywhere.** The server works out "today" in `Asia/Kolkata`; the client
+  builds date strings from local parts, because `toISOString()` would turn 12:30 AM into the
+  previous day.
+* **One bold element.** The amber dot-matrix board (Doto typeface) carries the identity; the rest of
+  the site stays in quiet pine and mint (Schibsted Grotesk). Fonts are bundled, not loaded from
+  Google, and the one animation is skipped for users who prefer reduced motion.
 
-- Colours: pine `#0F3B3A`, mint paper `#EEF3F0`, ink `#13201F`, LED amber `#F2B33D` (used only on the board), sage `#5E7A73`.
-- Type: Schibsted Grotesk everywhere, Doto only for the board's times. Fonts are bundled with the app rather than loaded from Google.
-- Motion: one moment. Board rows flip into place on load like a split-flap display. Nothing animates for users who prefer reduced motion.
+Fifteen bugs found while testing, and how each was traced, are written up in
+[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md).
 
-## Decisions worth explaining
+## Limitations and next steps
 
-**Cookie sessions instead of a JWT in localStorage.** JavaScript can't read an `httpOnly` cookie, so an XSS bug can't steal the session. The trade-off is CSRF, handled two ways: `SameSite=Lax` keeps the cookie off cross-site POSTs, and the server rejects writes that aren't `application/json`, which a plain HTML form can't send.
+* Sessions live in server memory and data in a JSON file, so both reset when the free Render
+  instance restarts. Next step: Postgres for data and Redis for sessions.
+* No payment step; "Pay & book" confirms straight away.
+* Prescription upload is not built; orders that need one are only flagged.
+* Next: an AngularJS admin panel for managing bookings, joined to the React app as a micro frontend.
 
-**RTK Query for server data, a slice only for the cart.** Doctors, slots and bookings belong to the server, so they live in RTK Query's cache. Booking a slot invalidates the `Slots` tag, so the slot list and the home board refetch on their own. The cart exists only in the browser, so it is the one hand-written slice.
-
-**Queries for personal data wait for a known user.** Bookings and orders are skipped whenever no signed-in user is known. Logging out clears the cache, and without this the bookings page could refetch in the moment before it unmounts and get a 401.
-
-**Virtualized doctor list.** Rendering all 500 rows would put every one in the DOM and make scrolling and filtering slow on cheap phones. `react-window` keeps about ten rows mounted. The row renderer is defined outside the page component; an inline function there would be a new component type on every render and remount every row.
-
-**Server owns prices and availability.** The client shows totals for convenience, but the order endpoint looks up every price itself and ignores anything the browser sends.
-
-**Time zones.** Clinic hours are IST. The server works out "today" and "now" in `Asia/Kolkata`; the client builds date strings from local date parts instead of `toISOString()`, which would shift 12:30 AM to the previous day.
-
-## Accessibility
-
-Labelled form fields with linked hints and errors, a skip link, visible focus rings, radio-based date and slot pickers, a modal that traps focus and returns it on close, a command palette built as an ARIA combobox, keyboard-operable tabs, and `prefers-reduced-motion` support.
-
-## Known limitations
-
-- Sessions use the in-memory store from `express-session`, so they are lost on restart and won't work across several servers. Production would use Redis (`connect-redis`).
-- `db.json` is rewritten on every change and is wiped on Render's free plan. A real deployment needs a database.
-- No payment step; "Pay & book" confirms directly.
-- Prescription upload is not built; orders that need one are only flagged.
-
-## Performance
-
-Run Lighthouse in Chrome DevTools on the deployed site and record your numbers here.
-
-| Page | Performance | Accessibility | Best practices |
-|---|---|---|---|
-| / | [your score] | [your score] | [your score] |
-| /doctors | [your score] | [your score] | [your score] |
-
-## Screenshots
-
-| Quick search | Doctor list |
-|---|---|
-| ![Command palette](docs/screenshots/search.png) | ![Doctors](docs/screenshots/doctors.png) |
-
-![Board on a phone](docs/screenshots/mobile.png)
+![Quick search with Ctrl+K](docs/screenshots/search.png)
