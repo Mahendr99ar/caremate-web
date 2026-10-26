@@ -1,0 +1,14 @@
+# One web service: Express serves the API and the built React app.
+services:
+  - type: web
+    name: caremate
+    runtime: node
+    plan: free
+    buildCommand: npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SESSION_SECRET
+        generateValue: true
